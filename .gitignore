@@ -1,0 +1,30 @@
+# Binaries and build artifacts
+bin/
+build/
+dist/
+tmp/
+
+# OS/editor files
+.DS_Store
+.idea/
+.vscode/
+
+# Logs
+*.log
+
+# Env files
+.env
+.env.*
+
+# Go
+coverage.*
+*.out
+go.work
+go.work.sum
+
+# Swagger generated files (keep docs/ design notes tracked)
+docs/docs.go
+docs/swagger.json
+docs/swagger.yaml
+
+frontend/
