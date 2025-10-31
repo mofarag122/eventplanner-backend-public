@@ -10,9 +10,9 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/evoplan/backend/internal/config"
-	"github.com/evoplan/backend/internal/models"
-	"github.com/evoplan/backend/internal/security"
+	"github.com/evoplanner/backend/internal/config"
+	"github.com/evoplanner/backend/internal/models"
+	"github.com/evoplanner/backend/internal/security"
 )
 
 const (

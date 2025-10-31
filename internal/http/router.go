@@ -9,8 +9,8 @@ import (
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 
-	docs "github.com/evoplan/backend/docs"
-	"github.com/evoplan/backend/internal/config"
+	docs "github.com/evoplanner/backend/docs"
+	"github.com/evoplanner/backend/internal/config"
 )
 
 // @title Backend API

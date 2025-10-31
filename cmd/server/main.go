@@ -8,9 +8,9 @@ import (
 
 	"github.com/joho/godotenv"
 
-	"github.com/evoplan/backend/internal/config"
-	"github.com/evoplan/backend/internal/db"
-	httpserver "github.com/evoplan/backend/internal/http"
+	"github.com/evoplanner/backend/internal/config"
+	"github.com/evoplanner/backend/internal/db"
+	httpserver "github.com/evoplanner/backend/internal/http"
 )
 
 func main() {

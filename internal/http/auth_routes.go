@@ -5,8 +5,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/evoplan/backend/internal/config"
-	"github.com/evoplan/backend/internal/http/handlers"
+	"github.com/evoplanner/backend/internal/config"
+	"github.com/evoplanner/backend/internal/http/handlers"
 )
 
 func mountAuthRoutes(r *gin.RouterGroup, cfg config.Config, db *sql.DB) {

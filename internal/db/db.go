@@ -6,7 +6,7 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 
-	"github.com/evoplan/backend/internal/config"
+	"github.com/evoplanner/backend/internal/config"
 )
 
 func Open(cfg config.Config) (*sql.DB, error) {
