@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -361,24 +362,34 @@ func (h *EventHandler) GetEventDetails(c *gin.Context) {
 
 	// Fetch Attendees
 	rows, _ := h.db.Query(`
-		SELECT u.id, u.first_name, u.last_name, em.role 
+		SELECT u.id, u.email, u.first_name, u.last_name, em.role 
 		FROM event_members em
 		JOIN users u ON em.user_id = u.id
 		WHERE em.event_id = ?`, eventID)
 
 	type Attendee struct {
-		ID   uint64 `json:"id"`
-		Name string `json:"name"`
-		Role string `json:"role"`
+		ID    uint64 `json:"id"`
+		Email string `json:"email"`
+		Name  string `json:"name"`
+		Role  string `json:"role"`
 	}
 	var attendees []Attendee
 	if rows != nil {
 		defer rows.Close()
 		for rows.Next() {
-			var a Attendee
-			var f, l string
-			rows.Scan(&a.ID, &f, &l, &a.Role)
-			a.Name = f + " " + l
+			var (
+				a     Attendee
+				id64  sql.NullInt64
+				email sql.NullString
+				fn    sql.NullString
+				ln    sql.NullString
+				r     sql.NullString
+			)
+
+			rows.Scan(&id64, &email, &fn, &ln, &r)
+			a.Email = email.String
+			a.Name = strings.Join([]string{fn.String, ln.String}, " ")
+			a.Role = r.String
 			attendees = append(attendees, a)
 		}
 	}
@@ -471,11 +482,11 @@ func (h *EventHandler) ListEventGuests(c *gin.Context) {
 	defer rows.Close()
 
 	type Guest struct {
-		ID       uint64 `json:"id"`
-		Name     string `json:"name"`
-		Email    string `json:"email"`
-		Status   string `json:"status"`
-		Role     string `json:"role"`
+		ID     uint64 `json:"id"`
+		Name   string `json:"name"`
+		Email  string `json:"email"`
+		Status string `json:"status"`
+		Role   string `json:"role"`
 	}
 
 	var guests []Guest
