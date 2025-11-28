@@ -12,6 +12,11 @@ import (
 
 func mountEventRoutes(r *gin.RouterGroup, cfg config.Config, db *sql.DB) {
 	h := handlers.NewEventHandler(cfg, db)
+
+	locHandler := handlers.NewLocationHandler(cfg, db)
+	r.GET("/cities", func(c *gin.Context) { locHandler.SearchCities(c) })
+	r.GET("/cities/reverse", func(c *gin.Context) { locHandler.ReverseGeocode(c) })
+
 	authMW := middleware.AuthMiddleware(cfg)
 
 	// Protected Routes
