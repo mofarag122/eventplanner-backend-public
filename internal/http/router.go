@@ -17,6 +17,9 @@ import (
 // @version 1.0
 // @description HTTP API for authentication and utilities
 // @BasePath /api/v1
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
 func NewRouter(cfg config.Config, db *sql.DB) http.Handler {
 	// Ensure docs package is referenced so generated Swagger is registered
 	docs.SwaggerInfo.BasePath = "/api/v1"
@@ -43,6 +46,7 @@ func NewRouter(cfg config.Config, db *sql.DB) http.Handler {
 
 	api := r.Group("/api/v1")
 	mountAuthRoutes(api, cfg, db)
+	mountEventRoutes(api, cfg, db)
 
 	// Swagger UI
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))

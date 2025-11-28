@@ -11,7 +11,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/evoplanner/backend/internal/config"
-	"github.com/evoplanner/backend/internal/models"
+	"github.com/evoplanner/backend/internal/domains"
 	"github.com/evoplanner/backend/internal/security"
 )
 
@@ -30,8 +30,10 @@ func NewAuthHandler(cfg config.Config, db *sql.DB) *AuthHandler {
 
 // SignupRequest represents the payload to register a new user.
 type SignupRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	FirstName *string `json:"firstName,omitempty"`
+	LastName  *string `json:"lastName,omitempty"`
+	Email     string  `json:"email"`
+	Password  string  `json:"password"`
 }
 
 // SignupResponse is returned after creating a user.
@@ -70,12 +72,31 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Prepare first_name and last_name for insertion:
+	var firstName interface{}
+	var lastName interface{}
+
+	if req.FirstName != nil {
+		fn := strings.TrimSpace(*req.FirstName)
+		firstName = fn // non-nil -> insert value (possibly empty string)
+	} else {
+		firstName = nil // nil -> INSERT NULL
+	}
+
+	if req.LastName != nil {
+		ln := strings.TrimSpace(*req.LastName)
+		lastName = ln
+	} else {
+		lastName = nil
+	}
+
 	res, err := h.db.Exec(
-		`INSERT INTO users (email, password_hash) VALUES (?, ?)`,
-		req.Email, hash,
+		`INSERT INTO users (first_name, last_name, email, password_hash) VALUES (?, ?, ?, ?)`,
+		firstName, lastName, req.Email, hash,
 	)
 	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "duplicate") || strings.Contains(strings.ToLower(err.Error()), "uk_users_email") {
+		lerr := strings.ToLower(err.Error())
+		if strings.Contains(lerr, "duplicate") || strings.Contains(lerr, "uk_users_email") {
 			http.Error(w, "email already registered", http.StatusConflict)
 			return
 		}
@@ -127,15 +148,36 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var u models.User
-	row := h.db.QueryRow(`SELECT id, email, password_hash, created_at, updated_at FROM users WHERE email = ?`, email)
-	if err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.CreatedAt, &u.UpdatedAt); err != nil {
+	var u domains.User
+	var firstName sql.NullString
+	var lastName sql.NullString
+
+	// select explicit columns (avoid relying on SELECT * column order)
+	row := h.db.QueryRow(
+		`SELECT id, first_name, last_name, email, password_hash FROM users WHERE email = ?`,
+		email,
+	)
+	if err := row.Scan(&u.ID, &firstName, &lastName, &u.Email, &u.PasswordHash); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			http.Error(w, invalidCredMsg, http.StatusUnauthorized)
 			return
 		}
 		http.Error(w, "failed to authenticate", http.StatusInternalServerError)
 		return
+	}
+
+	// Convert sql.NullString -> *string for domains.User fields
+	if firstName.Valid {
+		s := firstName.String
+		u.FirstName = &s
+	} else {
+		u.FirstName = nil
+	}
+	if lastName.Valid {
+		s := lastName.String
+		u.LastName = &s
+	} else {
+		u.LastName = nil
 	}
 
 	if err := security.CheckPassword(req.Password, u.PasswordHash); err != nil {
