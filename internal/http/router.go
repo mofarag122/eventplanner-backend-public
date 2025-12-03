@@ -47,6 +47,7 @@ func NewRouter(cfg config.Config, db *sql.DB) http.Handler {
 	api := r.Group("/api/v1")
 	mountAuthRoutes(api, cfg, db)
 	mountEventRoutes(api, cfg, db)
+	mountUserRoutes(api, cfg, db)
 
 	// Swagger UI
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))

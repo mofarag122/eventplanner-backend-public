@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -111,23 +112,115 @@ func (h *EventHandler) Create(c *gin.Context) {
 
 // ListMyEvents
 // @Summary List events for the current user
-// @Description Returns events where the user is either the organizer or a confirmed attendee.
+// @Description Returns events where the user is either the organizer or a confirmed attendee. Supports optional filtering.
 // @Tags events
 // @Produce json
 // @Security BearerAuth
+// @Param q query string false "Keyword search over event title and description"
+// @Param role query string false "Filter by the user's role in the event (organizer, collaborator, attendee)"
+// @Param from query string false "Filter events starting on or after this date (YYYY-MM-DD)"
+// @Param to query string false "Filter events starting on or before this date (YYYY-MM-DD)"
+// @Param limit query int false "Maximum number of results to return (default 50, max 100)"
+// @Param offset query int false "Number of results to skip (for pagination)"
 // @Success 200 {array} object "List of event summaries"
 // @Failure 500 {object} map[string]string "Database error"
+// @Failure 400 {object} map[string]string "Invalid filters"
 // @Router /events [get]
 func (h *EventHandler) ListMyEvents(c *gin.Context) {
 	userID := c.MustGet("userID").(uint64)
 
-	// Join events with members to find where user is involved
-	rows, err := h.db.Query(`
+	// --- Parse filters from query params ---
+	q := strings.TrimSpace(c.Query("q"))
+	roleParam := strings.TrimSpace(c.Query("role"))
+	fromStr := strings.TrimSpace(c.Query("from"))
+	toStr := strings.TrimSpace(c.Query("to"))
+
+	// Pagination params
+	limit := 50
+	offset := 0
+	if v := strings.TrimSpace(c.Query("limit")); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			if parsed > 100 {
+				parsed = 100
+			}
+			limit = parsed
+		}
+	}
+	if v := strings.TrimSpace(c.Query("offset")); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed >= 0 {
+			offset = parsed
+		}
+	}
+
+	var filters []string
+	var args []interface{}
+
+	// Base filter: events where the current user is a member
+	filters = append(filters, "em.user_id = ?")
+	args = append(args, userID)
+
+	// Optional role filter
+	if roleParam != "" {
+		switch domains.EventRole(roleParam) {
+		case domains.RoleOrganizer, domains.RoleCollaborator, domains.RoleAttendee:
+			filters = append(filters, "em.role = ?")
+			args = append(args, roleParam)
+		default:
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid role filter"})
+			return
+		}
+	}
+
+	// Optional keyword search over title + description
+	if q != "" {
+		like := "%" + q + "%"
+		filters = append(filters, "(e.title LIKE ? OR e.description LIKE ?)")
+		args = append(args, like, like)
+	}
+
+	const dateLayout = "2006-01-02"
+
+	// Optional date-from filter (inclusive)
+	if fromStr != "" {
+		fromTime, err := time.Parse(dateLayout, fromStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid 'from' date format, expected YYYY-MM-DD"})
+			return
+		}
+		filters = append(filters, "e.starts_at >= ?")
+		args = append(args, fromTime)
+	}
+
+	// Optional date-to filter (inclusive, end-of-day)
+	if toStr != "" {
+		toDate, err := time.Parse(dateLayout, toStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid 'to' date format, expected YYYY-MM-DD"})
+			return
+		}
+		// Add one day and use "< next day" to include the entire 'to' day.
+		toEnd := toDate.Add(24 * time.Hour)
+		filters = append(filters, "e.starts_at < ?")
+		args = append(args, toEnd)
+	}
+
+	// Build WHERE clause
+	where := ""
+	if len(filters) > 0 {
+		where = "WHERE " + strings.Join(filters, " AND ")
+	}
+
+	query := `
 		SELECT e.id, e.title, e.starts_at, e.organizer_id, em.role
 		FROM events e
 		JOIN event_members em ON e.id = em.event_id
-		WHERE em.user_id = ?
-		ORDER BY e.starts_at DESC`, userID)
+		` + where + `
+		ORDER BY e.starts_at DESC
+		LIMIT ? OFFSET ?`
+
+	args = append(args, limit, offset)
+
+	rows, err := h.db.Query(query, args...)
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch events"})
@@ -216,23 +309,85 @@ func (h *EventHandler) InviteUser(c *gin.Context) {
 }
 
 // ListInvitations
-// @Summary Get pending invitations
-// @Description Returns a list of all pending invitations for the logged-in user.
+// @Summary Get invitations for the current user
+// @Description Returns a list of invitations for the logged-in user. Supports search and status filters.
 // @Tags invitations
 // @Produce json
 // @Security BearerAuth
+// @Param q query string false "Keyword search over event title or inviter name"
+// @Param status query string false "Filter by invitation status (pending, going, maybe, not_going)"
+// @Param limit query int false "Maximum number of results to return (default 50, max 100)"
+// @Param offset query int false "Number of results to skip (for pagination)"
 // @Success 200 {array} object "List of invitations"
 // @Failure 500 {object} map[string]string "Database error"
 // @Router /invitations [get]
 func (h *EventHandler) ListInvitations(c *gin.Context) {
 	userID := c.MustGet("userID").(uint64)
 
-	rows, err := h.db.Query(`
+	q := strings.TrimSpace(c.Query("q"))
+	status := strings.TrimSpace(c.Query("status"))
+
+	limit := 50
+	offset := 0
+	if v := strings.TrimSpace(c.Query("limit")); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			if parsed > 100 {
+				parsed = 100
+			}
+			limit = parsed
+		}
+	}
+	if v := strings.TrimSpace(c.Query("offset")); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed >= 0 {
+			offset = parsed
+		}
+	}
+
+	var filters []string
+	var args []interface{}
+
+	filters = append(filters, "i.invitee_id = ?")
+	args = append(args, userID)
+
+	// Optional status filter
+	if status != "" {
+		switch domains.InvitationResponse(status) {
+		case domains.ResponsePending, domains.ResponseGoing, domains.ResponseMaybe, domains.ResponseNotGoing:
+			filters = append(filters, "i.response = ?")
+			args = append(args, status)
+		default:
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid status filter"})
+			return
+		}
+	} else {
+		// Default to pending only (previous behavior)
+		filters = append(filters, "i.response = 'pending'")
+	}
+
+	// Optional keyword search over event title or inviter name
+	if q != "" {
+		like := "%" + q + "%"
+		filters = append(filters, "(e.title LIKE ? OR u.first_name LIKE ? OR u.last_name LIKE ?)")
+		args = append(args, like, like, like)
+	}
+
+	where := ""
+	if len(filters) > 0 {
+		where = "WHERE " + strings.Join(filters, " AND ")
+	}
+
+	query := `
 		SELECT i.id, i.event_id, e.title, u.first_name, u.last_name, i.invited_as
 		FROM invitations i
 		JOIN events e ON i.event_id = e.id
 		JOIN users u ON i.inviter_id = u.id
-		WHERE i.invitee_id = ? AND i.response = 'pending'`, userID)
+		` + where + `
+		ORDER BY i.id DESC
+		LIMIT ? OFFSET ?`
+
+	args = append(args, limit, offset)
+
+	rows, err := h.db.Query(query, args...)
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
@@ -443,11 +598,15 @@ func (h *EventHandler) Delete(c *gin.Context) {
 
 // ListEventGuests
 // @Summary Get full guest list with statuses
-// @Description Returns the status of all invited users (Pending, Going, Maybe, Not Going). Restricted to the Organizer.
+// @Description Returns the status of all invited users (Pending, Going, Maybe, Not Going). Restricted to the Organizer. Supports optional filtering.
 // @Tags events
 // @Produce json
 // @Security BearerAuth
 // @Param id path int true "Event ID"
+// @Param q query string false "Keyword search over guest name or email"
+// @Param role query string false "Filter by invited role (collaborator, attendee)"
+// @Param limit query int false "Maximum number of results to return (default 50, max 100)"
+// @Param offset query int false "Number of results to skip (for pagination)"
 // @Success 200 {array} object "List of guests with status"
 // @Failure 403 {object} map[string]string "Forbidden"
 // @Failure 500 {object} map[string]string "Database error"
@@ -468,12 +627,67 @@ func (h *EventHandler) ListEventGuests(c *gin.Context) {
 		return
 	}
 
-	// Query Invitations
-	rows, err := h.db.Query(`
+	// Optional filters
+	q := strings.TrimSpace(c.Query("q"))
+	roleParam := strings.TrimSpace(c.Query("role"))
+
+	// Pagination
+	limit := 50
+	offset := 0
+	if v := strings.TrimSpace(c.Query("limit")); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			if parsed > 100 {
+				parsed = 100
+			}
+			limit = parsed
+		}
+	}
+	if v := strings.TrimSpace(c.Query("offset")); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed >= 0 {
+			offset = parsed
+		}
+	}
+
+	var filters []string
+	var args []interface{}
+
+	filters = append(filters, "i.event_id = ?")
+	args = append(args, eventID)
+
+	if roleParam != "" {
+		switch domains.InvitationRole(roleParam) {
+		case domains.InvitedAsCollaborator, domains.InvitedAsAttendee:
+			filters = append(filters, "i.invited_as = ?")
+			args = append(args, roleParam)
+		default:
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid role filter"})
+			return
+		}
+	}
+
+	if q != "" {
+		like := "%" + q + "%"
+		filters = append(filters, `(u.email LIKE ? OR u.first_name LIKE ? OR u.last_name LIKE ?)`)
+		args = append(args, like, like, like)
+	}
+
+	where := ""
+	if len(filters) > 0 {
+		where = "WHERE " + strings.Join(filters, " AND ")
+	}
+
+	query := `
 		SELECT u.id, u.first_name, u.last_name, u.email, i.response, i.invited_as
 		FROM invitations i
 		JOIN users u ON i.invitee_id = u.id
-		WHERE i.event_id = ?`, eventID)
+		` + where + `
+		ORDER BY u.first_name, u.last_name
+		LIMIT ? OFFSET ?`
+
+	args = append(args, limit, offset)
+
+	// Query Invitations
+	rows, err := h.db.Query(query, args...)
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
