@@ -25,5 +25,3 @@ run:
 .PHONY: clean-docs
 clean-docs:
 	rm -rf ./docs/*.go ./docs/swagger.json ./docs/swagger.yaml
-
-
