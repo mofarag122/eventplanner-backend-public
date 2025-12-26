@@ -1,0 +1,77 @@
+services:
+  evoplan-db:
+    build:
+      context: ./backend/db
+      dockerfile: Dockerfile
+    image: evoplan-db:dev
+    container_name: evoplan-db
+    ports:
+      - "3307:3306"
+    networks:
+      - evoplan-data
+    volumes:
+      - evoplan-mysql:/var/lib/mysql
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  evoplan-db-init:
+    image: python:alpine
+    container_name: evoplan-db-init
+    depends_on:
+      evoplan-db:
+        condition: service_healthy
+    networks:
+      - evoplan-data
+    volumes:
+      - ./backend/db/populate_db.py:/app/populate_db.py
+      - ./backend/db/worldcities.csv:/app/worldcities.csv
+    environment:
+      DB_HOST: evoplan-db
+      DB_NAME: evoplan
+      DB_USER: evoplan
+      DB_PASSWORD: evoplan
+    command: >
+      python /app/populate_db.py
+      --host ${DB_HOST}
+      --database ${DB_NAME}
+      --user ${DB_USER}
+      --password ${DB_PASSWORD}
+      --mode simplemaps
+      --cities-csv /app/worldcities.csv
+    restart: "no"
+
+  evoplan-core:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: evoplan-core:dev
+    container_name: evoplan-core
+    ports:
+      - "8080:8080"
+    networks:
+      - evoplan-data
+      - evoplan-api
+    restart: unless-stopped
+
+  evoplan-web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: evoplan-web:dev
+    container_name: evoplan-web
+    ports:
+      - "9000:80"
+    networks:
+      - evoplan-api
+    restart: unless-stopped
+
+networks:
+  evoplan-api:
+  evoplan-data:
+
+volumes:
+  evoplan-mysql:
